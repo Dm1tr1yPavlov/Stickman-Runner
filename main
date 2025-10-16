@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stickman Runner: Метеоритная угроза</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(to bottom, #1a2a6c, #b21f1f, #fdbb2d);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 400px;
+        }
+        
+        #game-canvas {
+            background-color: #222;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+        }
+        
+        #score {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        #start-screen, #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 10px;
+        }
+        
+        #game-over {
+            display: none;
+        }
+        
+        h1 {
+            font-size: 36px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px #ff6600;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 18px;
+            background: linear-gradient(to bottom, #ff6600, #cc5200);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 4px 0 #993d00;
+            transition: all 0.1s;
+        }
+        
+        button:hover {
+            transform: translateY(2px);
+            box-shadow: 0 2px 0 #993d00;
+        }
+        
+        .instructions {
+            text-align: center;
+            max-width: 80%;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        
+        .key {
+            display: inline-block;
+            padding: 2px 8px;
+            background-color: #444;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        #damage-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff0000;
+            font-size: 48px;
+            font-weight: bold;
+            text-shadow: 0 0 10px #fff;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        
+        #chaser-warning {
+            position: absolute;
+            top: 60px;
+            left: 10px;
+            color: #ff9900;
+            font-size: 16px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas" width="800" height="400"></canvas>
+        
+        <div id="ui">
+            <div id="score">Очки: 0</div>
+            <div id="lives">Жизни: 3</div>
+            <div id="chaser-warning">СТИКМАН БЛИЗКО!</div>
+        </div>
+        
+        <div id="damage-indicator">-1 ЖИЗНЬ!</div>
+        
+        <div id="start-screen">
+            <h1>Stickman Runner</h1>
+            <div class="instructions">
+                Уворачивайтесь от метеоритов! За вами гонится злой стикман.<br>
+                Используйте <span class="key">←</span> и <span class="key">→</span> для движения влево и вправо.<br>
+                Используйте <span class="key">ПРОБЕЛ</span> для прыжка.<br>
+                Столкновение со стикманом отнимает 1 жизнь!<br>
+                Обратите внимание на красные круги - это зоны поражения метеоритов!
+            </div>
+            <button id="start-button">Начать игру</button>
+        </div>
+        
+        <div id="game-over">
+            <h1>Игра окончена!</h1>
+            <div id="final-score">Ваш счет: 0</div>
+            <button id="restart-button">Играть снова</button>
+        </div>
+    </div>
+
+    <script>
+        // Получаем элементы DOM
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const scoreElement = document.getElementById('score');
+        const livesElement = document.getElementById('lives');
+        const finalScoreElement = document.getElementById('final-score');
+        const chaserWarningElement = document.getElementById('chaser-warning');
+        const damageIndicator = document.getElementById('damage-indicator');
+
+        // Игровые переменные
+        let gameRunning = false;
+        let score = 0;
+        let lives = 3;
+        let gameSpeed = 5;
+        const groundLevel = 340;
+        let lastChaserDamageTime = 0;
+        const chaserDamageCooldown = 1000; // 1 секунда перезарядки урона
+        
+        // Игровые объекты
+        const player = {
+            x: 100,
+            y: 300,
+            width: 20,
+            height: 40,
+            speed: 7,
+            color: '#3498db',
+            isJumping: false,
+            jumpPower: 0,
+            gravity: 0.5,
+            jumpStrength: 12
+        };
+        
+        const chaser = {
+            x: -50,
+            y: 300,
+            width: 20,
+            height: 40,
+            speed: 5/4, // Замедлен в 3 раза
+            color: '#e74c3c'
+        };
+        
+        let meteors = [];
+        let obstacles = [];
+        let keys = {};
+        
+        // Слушатели событий
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            
+            // Прыжок при нажатии пробела
+            if (e.code === 'Space' && !player.isJumping && gameRunning) {
+                player.isJumping = true;
+                player.jumpPower = player.jumpStrength;
+            }
+            
+            // Предотвращаем прокрутку страницы при использовании пробела
+            if (e.code === 'Space') {
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+        
+        // Функции игры
+        function startGame() {
+            gameRunning = true;
+            score = 0;
+            lives = 3;
+            gameSpeed = 5;
+            lastChaserDamageTime = 0;
+            
+            player.x = 100;
+            player.y = 300;
+            player.isJumping = false;
+            player.jumpPower = 0;
+            
+            chaser.x = -50;
+            chaser.y = 300;
+            
+            meteors = [];
+            obstacles = [];
+            
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            damageIndicator.style.opacity = '0';
+            chaserWarningElement.style.opacity = '0';
+            
+            updateScore();
+            updateLives();
+            
+            gameLoop();
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            finalScoreElement.textContent = `Ваш счет: ${score}`;
+            gameOverScreen.style.display = 'flex';
+        }
+        
+        function updateScore() {
+            scoreElement.textContent = `Очки: ${score}`;
+        }
+        
+        function updateLives() {
+            livesElement.textContent = `Жизни: ${lives}`;
+        }
+        
+        function showDamageIndicator() {
+            damageIndicator.style.opacity = '1';
+            setTimeout(() => {
+                damageIndicator.style.opacity = '0';
+            }, 1000);
+        }
+        
+        function showChaserWarning() {
+            chaserWarningElement.style.opacity = '1';
+            setTimeout(() => {
+                chaserWarningElement.style.opacity = '0';
+            }, 1000);
+        }
+        
+        function spawnMeteor() {
+            if (Math.random() < 0.005) {
+                const x = Math.random() * (canvas.width - 100) + 50;
+                meteors.push({
+                    x: x,
+                    y: -50,
+                    radius: 15,
+                    impactRadius: 80,
+                    speed: 6,
+                    impactVisible: true,
+                    color: '#ff3300'
+                });
+            }
+        }
+        
+        function spawnObstacle() {
+            if (Math.random() < 0.02) {
+                obstacles.push({
+                    x: canvas.width,
+                    y: 320,
+                    width: 20,
+                    height: 30,
+                    speed: gameSpeed,
+                    color: '#888'
+                });
+            }
+        }
+        
+        function updatePlayer() {
+            // Движение влево и вправо
+            if (keys['ArrowLeft'] && player.x > 0) {
+                player.x -= player.speed;
+            }
+            if (keys['ArrowRight'] && player.x < canvas.width - player.width) {
+                player.x += player.speed;
+            }
+            
+            // Логика прыжка
+            if (player.isJumping) {
+                player.y -= player.jumpPower;
+                player.jumpPower -= player.gravity;
+                
+                // Если игрок достиг земли
+                if (player.y >= 300) {
+                    player.y = 300;
+                    player.isJumping = false;
+                    player.jumpPower = 0;
+                }
+            }
+        }
+        
+        function updateChaser() {
+            // Преследователь всегда движется к игроку
+            if (chaser.x < player.x - 50) {
+                chaser.x += chaser.speed;
+            } else if (chaser.x > player.x - 50) {
+                chaser.x -= chaser.speed;
+            }
+            
+            // Предупреждение, когда стикман близко
+            if (Math.abs(player.x - chaser.x) < 150) {
+                showChaserWarning();
+            }
+            
+            // Проверка столкновения с преследователем
+            const isColliding = Math.abs(player.x - chaser.x) < player.width && 
+                               Math.abs(player.y - chaser.y) < player.height;
+            
+            if (isColliding) {
+                const currentTime = Date.now();
+                // Проверяем, прошло ли достаточно времени с последнего урона
+                if (currentTime - lastChaserDamageTime > chaserDamageCooldown) {
+                    // Наносим урон
+                    lives--;
+                    updateLives();
+                    showDamageIndicator();
+                    lastChaserDamageTime = currentTime;
+                    
+                    if (lives <= 0) {
+                        gameOver();
+                        return;
+                    }
+                }
+            }
+        }
+        
+        function updateMeteors() {
+            for (let i = meteors.length - 1; i >= 0; i--) {
+                const meteor = meteors[i];
+                meteor.y += meteor.speed;
+                
+                // Проверка столкновения с метеоритом
+                const distance = Math.sqrt(
+                    Math.pow(player.x + player.width/2 - meteor.x, 2) + 
+                    Math.pow(player.y + player.height/2 - meteor.y, 2)
+                );
+                
+                if (distance < meteor.impactRadius) {
+                    lives--;
+                    updateLives();
+                    meteors.splice(i, 1);
+                    showDamageIndicator();
+                    
+                    if (lives <= 0) {
+                        gameOver();
+                        return;
+                    }
+                }
+                
+                // Удаление метеоритов, улетевших за экран
+                if (meteor.y > canvas.height + 100) {
+                    meteors.splice(i, 1);
+                    score += 10;
+                    updateScore();
+                }
+            }
+        }
+        
+        function updateObstacles() {
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obstacle = obstacles[i];
+                obstacle.x -= obstacle.speed;
+                
+                // Проверка столкновения с препятствием
+                if (player.x < obstacle.x + obstacle.width &&
+                    player.x + player.width > obstacle.x &&
+                    player.y < obstacle.y + obstacle.height &&
+                    player.y + player.height > obstacle.y) {
+                    
+                    lives--;
+                    updateLives();
+                    obstacles.splice(i, 1);
+                    showDamageIndicator();
+                    
+                    if (lives <= 0) {
+                        gameOver();
+                        return;
+                    }
+                }
+                
+                // Удаление препятствий, ушедших за экран
+                if (obstacle.x < -obstacle.width) {
+                    obstacles.splice(i, 1);
+                    score += 5;
+                    updateScore();
+                }
+            }
+        }
+        
+        function drawPlayer() {
+            // Рисуем стикмена-игрока
+            ctx.fillStyle = player.color;
+            
+            // Тело
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            
+            // Голова
+            ctx.beginPath();
+            ctx.arc(player.x + player.width/2, player.y - 10, 12, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Ноги (не выходят за пределы белой полосы)
+            const legLength = Math.min(20, groundLevel - (player.y + player.height));
+            if (legLength > 0) {
+                ctx.beginPath();
+                ctx.moveTo(player.x + player.width/2, player.y + player.height);
+                ctx.lineTo(player.x + player.width/2 - 10, player.y + player.height + legLength);
+                ctx.moveTo(player.x + player.width/2, player.y + player.height);
+                ctx.lineTo(player.x + player.width/2 + 10, player.y + player.height + legLength);
+                ctx.strokeStyle = player.color;
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            
+            // Руки
+            ctx.beginPath();
+            ctx.moveTo(player.x + player.width/2, player.y + 15);
+            ctx.lineTo(player.x + player.width/2 - 15, player.y + 5);
+            ctx.moveTo(player.x + player.width/2, player.y + 15);
+            ctx.lineTo(player.x + player.width/2 + 15, player.y + 5);
+            ctx.stroke();
+        }
+        
+        function drawChaser() {
+            // Рисуем стикмена-преследователя
+            ctx.fillStyle = chaser.color;
+            
+            // Тело
+            ctx.fillRect(chaser.x, chaser.y, chaser.width, chaser.height);
+            
+            // Голова
+            ctx.beginPath();
+            ctx.arc(chaser.x + chaser.width/2, chaser.y - 10, 12, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Ноги (не выходят за пределы белой полосы)
+            const legLength = Math.min(20, groundLevel - (chaser.y + chaser.height));
+            if (legLength > 0) {
+                ctx.beginPath();
+                ctx.moveTo(chaser.x + chaser.width/2, chaser.y + chaser.height);
+                ctx.lineTo(chaser.x + chaser.width/2 - 10, chaser.y + chaser.height + legLength);
+                ctx.moveTo(chaser.x + chaser.width/2, chaser.y + chaser.height);
+                ctx.lineTo(chaser.x + chaser.width/2 + 10, chaser.y + chaser.height + legLength);
+                ctx.strokeStyle = chaser.color;
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            
+            // Руки
+            ctx.beginPath();
+            ctx.moveTo(chaser.x + chaser.width/2, chaser.y + 15);
+            ctx.lineTo(chaser.x + chaser.width/2 - 15, chaser.y + 5);
+            ctx.moveTo(chaser.x + chaser.width/2, chaser.y + 15);
+            ctx.lineTo(chaser.x + chaser.width/2 + 15, chaser.y + 5);
+            ctx.stroke();
+            
+            // Злые глаза
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(chaser.x + chaser.width/2 - 5, chaser.y - 12, 3, 0, Math.PI * 2);
+            ctx.arc(chaser.x + chaser.width/2 + 5, chaser.y - 12, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Злой рот
+            ctx.beginPath();
+            ctx.moveTo(chaser.x + chaser.width/2 - 5, chaser.y - 5);
+            ctx.lineTo(chaser.x + chaser.width/2 + 5, chaser.y - 5);
+            ctx.stroke();
+        }
+        
+        function drawMeteors() {
+            for (const meteor of meteors) {
+                // Рисуем радиус поражения
+                if (meteor.impactVisible) {
+                    ctx.beginPath();
+                    ctx.arc(meteor.x, meteor.y, meteor.impactRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 50, 50, 0.2)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                    ctx.stroke();
+                }
+                
+                // Рисуем метеорит
+                ctx.fillStyle = meteor.color;
+                ctx.beginPath();
+                ctx.arc(meteor.x, meteor.y, meteor.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Рисуем хвост метеорита
+                ctx.beginPath();
+                ctx.moveTo(meteor.x, meteor.y);
+                ctx.lineTo(meteor.x - 20, meteor.y - 40);
+                ctx.strokeStyle = '#ff6600';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+        }
+        
+        function drawObstacles() {
+            for (const obstacle of obstacles) {
+                ctx.fillStyle = obstacle.color;
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            }
+        }
+        
+        function drawBackground() {
+            // Земля
+            ctx.fillStyle = '#5d4037';
+            ctx.fillRect(0, groundLevel, canvas.width, canvas.height - groundLevel);
+            
+            // Линия горизонта
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, groundLevel);
+            ctx.lineTo(canvas.width, groundLevel);
+            ctx.stroke();
+            
+            // Звезды
+            ctx.fillStyle = '#fff';
+            for (let i = 0; i < 50; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * 200;
+                const size = Math.random() * 2;
+                ctx.fillRect(x, y, size, size);
+            }
+        }
+        
+        function gameLoop() {
+            if (!gameRunning) return;
+            
+            // Очистка canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Отрисовка
+            drawBackground();
+            drawPlayer();
+            drawChaser();
+            drawMeteors();
+            drawObstacles();
+            
+            // Обновление
+            updatePlayer();
+            updateChaser();
+            updateMeteors();
+            updateObstacles();
+            
+            // Спавн новых объектов
+            spawnMeteor();
+            spawnObstacle();
+            
+            // Увеличение сложности
+            if (score > 0 && score % 100 === 0) {
+                gameSpeed = 5 + Math.floor(score / 100) * 0.5;
+            }
+            
+            // Следующий кадр
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Начальная отрисовка экрана
+        drawBackground();
+        drawPlayer();
+        drawChaser();
+    </script>
+</body>
+</html>
